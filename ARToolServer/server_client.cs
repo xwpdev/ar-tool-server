@@ -10,6 +10,9 @@ using System.IO;
 using System.Drawing.Imaging;
 using ARToolServer;
 using System.Runtime.Serialization.Formatters.Binary;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
+
 namespace ARToolServer
 {
     public class Client
@@ -270,7 +273,7 @@ namespace ARToolServer
                     stream.Read(bytesFrom, 0, 4); //read how many bytes are incoming (size of videos name)
                     bytesToCome = BitConverter.ToInt32(bytesFrom, 0);
                     string filename = Encoding.UTF8.GetString(receiveBytes(bytesToCome));
-                 
+
                     //TODO logic to check if user would go over his upload limit
 
                     //--------------------------------------------------------------------------------
@@ -283,11 +286,55 @@ namespace ARToolServer
                     //send the SAS link to the client -- that application then handles the actual uploading of the video the azure storage
                     ////--------------------------------------------------------------------------------
 
+                    string policyName = "SimLabIT_Policy";
+                    string containerName = "videocontainer";
+                    CloudStorageAccount storageAccount;
+                    CloudBlobContainer cloudBlobContainer;
+                    string storageConnectionString = "DefaultEndpointsProtocol=https;AccountName=simlabitvideos;AccountKey=yWWkrOc52O+krVXnikLhy8at9cXX3LKWEBeBD4jHmImY2hYzNcCyWsaEAaEvk4XnYnkMl+mH1U6Z2kN3RJHkEw==;EndpointSuffix=core.windows.net";
 
+                    // Check whether the connection string can be parsed.
+                    if (CloudStorageAccount.TryParse(storageConnectionString, out storageAccount))
+                    {
+                        // If the connection string is valid, proceed with operations against Blob storage here.
 
+                        // Create the CloudBlobClient that represents the Blob storage endpoint for the storage account.
+                        CloudBlobClient cloudBlobClient = storageAccount.CreateCloudBlobClient();
 
-                    return -1;
+                        // Create a container and append a GUID value to it to make the name unique. 
+                        cloudBlobContainer = cloudBlobClient.GetContainerReference(containerName.ToLower());
 
+                        cloudBlobContainer.CreateIfNotExists();
+
+                        // Set the permissions so the blobs are public. 
+                        BlobContainerPermissions permissions = new BlobContainerPermissions
+                        {
+                            PublicAccess = BlobContainerPublicAccessType.Blob
+                        };
+
+                        var storedPolicy = new SharedAccessBlobPolicy()
+                        {
+                            SharedAccessExpiryTime = DateTime.UtcNow.AddHours(24),
+                            SharedAccessStartTime = DateTime.UtcNow.AddMinutes(-1),
+                            Permissions = SharedAccessBlobPermissions.Read | SharedAccessBlobPermissions.Write | SharedAccessBlobPermissions.List
+                        };
+
+                        // add in the new one
+                        permissions.SharedAccessPolicies.Add(policyName, storedPolicy);
+                        cloudBlobContainer.SetPermissions(permissions);
+
+                        // upload files
+                        CloudBlockBlob cloudBlockBlob = cloudBlobContainer.GetBlockBlobReference(filename);
+                        cloudBlockBlob.UploadFromByteArray(bytesFrom, 0, 4);
+
+                        // Now we are ready to create a shared access signature based on the stored access policy
+                        var containerSignature = cloudBlobContainer.GetSharedAccessSignature(storedPolicy, policyName);
+
+                        return 1;
+                    }
+                    else
+                    {
+                        return -1;
+                    }
 
                 case PROTOCOL_CODES.REQUEST_VIEW_VIDEO:
                     sendProtocolCode(PROTOCOL_CODES.ACCEPT);
