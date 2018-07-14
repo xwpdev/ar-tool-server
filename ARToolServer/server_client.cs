@@ -46,6 +46,9 @@ namespace ARToolServer
         //userinfo
         string username = ""; //logged in username
 
+        // storage account data
+        string policyName = "SimLabIT_Policy";
+        string storageConnectionString = "DefaultEndpointsProtocol=https;AccountName=simlabitvideos;AccountKey=yWWkrOc52O+krVXnikLhy8at9cXX3LKWEBeBD4jHmImY2hYzNcCyWsaEAaEvk4XnYnkMl+mH1U6Z2kN3RJHkEw==;EndpointSuffix=core.windows.net";
 
         public void startClient(TcpClient inClientSocket, string clineNo)
         {
@@ -219,6 +222,7 @@ namespace ARToolServer
         int handleRequest(PROTOCOL_CODES request)
         {
             Int32 bytesToCome;
+            string sasLink;
             switch (request)
             {
                 case PROTOCOL_CODES.SENDIMAGE:
@@ -286,55 +290,9 @@ namespace ARToolServer
                     //send the SAS link to the client -- that application then handles the actual uploading of the video the azure storage
                     ////--------------------------------------------------------------------------------
 
-                    string policyName = "SimLabIT_Policy";
-                    string containerName = "videocontainer";
-                    CloudStorageAccount storageAccount;
-                    CloudBlobContainer cloudBlobContainer;
-                    string storageConnectionString = "DefaultEndpointsProtocol=https;AccountName=simlabitvideos;AccountKey=yWWkrOc52O+krVXnikLhy8at9cXX3LKWEBeBD4jHmImY2hYzNcCyWsaEAaEvk4XnYnkMl+mH1U6Z2kN3RJHkEw==;EndpointSuffix=core.windows.net";
+                    sasLink = UploadToAzure(bytesFrom, filename);
 
-                    // Check whether the connection string can be parsed.
-                    if (CloudStorageAccount.TryParse(storageConnectionString, out storageAccount))
-                    {
-                        // If the connection string is valid, proceed with operations against Blob storage here.
-
-                        // Create the CloudBlobClient that represents the Blob storage endpoint for the storage account.
-                        CloudBlobClient cloudBlobClient = storageAccount.CreateCloudBlobClient();
-
-                        // Create a container and append a GUID value to it to make the name unique. 
-                        cloudBlobContainer = cloudBlobClient.GetContainerReference(containerName.ToLower());
-
-                        cloudBlobContainer.CreateIfNotExists();
-
-                        // Set the permissions so the blobs are public. 
-                        BlobContainerPermissions permissions = new BlobContainerPermissions
-                        {
-                            PublicAccess = BlobContainerPublicAccessType.Blob
-                        };
-
-                        var storedPolicy = new SharedAccessBlobPolicy()
-                        {
-                            SharedAccessExpiryTime = DateTime.UtcNow.AddHours(24),
-                            SharedAccessStartTime = DateTime.UtcNow.AddMinutes(-1),
-                            Permissions = SharedAccessBlobPermissions.Read | SharedAccessBlobPermissions.Write | SharedAccessBlobPermissions.List
-                        };
-
-                        // add in the new one
-                        permissions.SharedAccessPolicies.Add(policyName, storedPolicy);
-                        cloudBlobContainer.SetPermissions(permissions);
-
-                        // upload files
-                        CloudBlockBlob cloudBlockBlob = cloudBlobContainer.GetBlockBlobReference(filename);
-                        cloudBlockBlob.UploadFromByteArray(bytesFrom, 0, 4);
-
-                        // Now we are ready to create a shared access signature based on the stored access policy
-                        var containerSignature = cloudBlobContainer.GetSharedAccessSignature(storedPolicy, policyName);
-
-                        return 1;
-                    }
-                    else
-                    {
-                        return -1;
-                    }
+                    return -1;
 
                 case PROTOCOL_CODES.REQUEST_VIEW_VIDEO:
                     sendProtocolCode(PROTOCOL_CODES.ACCEPT);
@@ -353,6 +311,7 @@ namespace ARToolServer
                         //
                         //send the SAS link to the client -- that application then handles the 
                         ////--------------------------------------------------------------------------------
+                        sasLink = UploadToAzure(videoData, videoID);
                     }
 
                     return -1;
@@ -384,6 +343,55 @@ namespace ARToolServer
                     return -1;
             }
 
+        }
+
+        private string UploadToAzure(byte[] bytesFrom, string filename)
+        {
+            CloudStorageAccount storageAccount;
+            CloudBlobContainer cloudBlobContainer;
+
+            // Check whether the connection string can be parsed.
+            if (CloudStorageAccount.TryParse(storageConnectionString, out storageAccount))
+            {
+                // If the connection string is valid, proceed with operations against Blob storage here.
+
+                // Create the CloudBlobClient that represents the Blob storage endpoint for the storage account.
+                CloudBlobClient cloudBlobClient = storageAccount.CreateCloudBlobClient();
+
+                // Create a container and append a GUID value to it to make the name unique. 
+                cloudBlobContainer = cloudBlobClient.GetContainerReference(username.ToLower());
+
+                cloudBlobContainer.CreateIfNotExists();
+
+                // Set the permissions so the blobs are public. 
+                BlobContainerPermissions permissions = new BlobContainerPermissions
+                {
+                    PublicAccess = BlobContainerPublicAccessType.Container
+                };
+
+                var storedPolicy = new SharedAccessBlobPolicy()
+                {
+                    SharedAccessExpiryTime = DateTime.UtcNow.AddHours(24),
+                    SharedAccessStartTime = DateTime.UtcNow.AddMinutes(-1),
+                    Permissions = SharedAccessBlobPermissions.Read | SharedAccessBlobPermissions.Write | SharedAccessBlobPermissions.List
+                };
+
+                // add in the new one
+                permissions.SharedAccessPolicies.Add(policyName, storedPolicy);
+                cloudBlobContainer.SetPermissions(permissions);
+
+                // upload files
+                CloudBlockBlob cloudBlockBlob = cloudBlobContainer.GetBlockBlobReference(filename);
+                cloudBlockBlob.UploadFromByteArray(bytesFrom, 0, 4);
+
+                // Now we are ready to create a shared access signature based on the stored access policy
+                return cloudBlobContainer.GetSharedAccessSignature(storedPolicy, policyName);
+
+            }
+            else
+            {
+                return string.Empty;
+            }
         }
 
         PROTOCOL_CODES getRequest()
